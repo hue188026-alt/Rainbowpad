@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cross-Platform Rainbow Hookpad</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #18181c;
+      color: #fff;
+      margin: 0;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .app-container {
+      width: 100%;
+      max-width: 800px; /* PC 화면에서도 깔끔하게 정렬 */
+      background: #23232a;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    h2 { text-align: center; margin: 0 0 16px 0; font-size: 1.3rem; color: #f0f0f0; }
+    
+    /* 피아노 롤 타임라인 */
+    .timeline-wrapper { overflow-x: auto; padding-bottom: 8px; }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(16, minmax(40px, 1fr));
+      gap: 4px;
+      background: #121215;
+      padding: 8px;
+      border-radius: 8px;
+      min-width: 640px; /* 모바일 가로 스크롤 보장 */
+    }
+    .grid-cell {
+      height: 60px;
+      background: #2c2c36;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1rem;
+      transition: transform 0.1s;
+    }
+    .grid-cell:active { transform: scale(0.95); }
+
+    /* Hookpad 스타일 무지개 색상 (스케일 디그리) */
+    .sd-1 { background-color: #FF4B4B !important; color: white; }
+    .sd-2 { background-color: #FF9500 !important; color: white; }
+    .sd-3 { background-color: #FFCC00 !important; color: black; }
+    .sd-4 { background-color: #4CD964 !important; color: white; }
+    .sd-5 { background-color: #5AC8FA !important; color: black; }
+    .sd-6 { background-color: #007AFF !important; color: white; }
+    .sd-7 { background-color: #5856D6 !important; color: white; }
+
+    /* 키패드 및 조작 버튼 */
+    .keypad {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .key-btn {
+      padding: 16px 0;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 1.1rem;
+      cursor: pointer;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+    
+    .controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .ctrl-btn {
+      flex: 1;
+      padding: 14px;
+      background: #34c759;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .ctrl-btn.clear { background: #ff3b30; }
+    .ctrl-btn.rest { background: #8e8e93; }
+
+    .hint {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <h2>🌈 Rainbow Hookpad</h2>
+
+    <div class="timeline-wrapper">
+      <div class="grid-container" id="timeline"></div>
+    </div>
+
+    <div class="keypad">
+      <button class="key-btn sd-1" onclick="addNote(1)">1</button>
+      <button class="key-btn sd-2" onclick="addNote(2)">2</button>
+      <button class="key-btn sd-3" onclick="addNote(3)">3</button>
+      <button class="key-btn sd-4" onclick="addNote(4)">4</button>
+      <button class="key-btn sd-5" onclick="addNote(5)">5</button>
+      <button class="key-btn sd-6" onclick="addNote(6)">6</button>
+      <button class="key-btn sd-7" onclick="addNote(7)">7</button>
+    </div>
+
+    <div class="controls">
+      <button class="ctrl-btn rest" onclick="addRest()">쉼표 (Rest)</button>
+      <button class="ctrl-btn" onclick="playMelody()">▶ 재생하기</button>
+      <button class="ctrl-btn clear" onclick="clearMelody()">전체 삭제</button>
+    </div>
+
+    <div class="hint">💻 노트북 키보드: [1~7] 음계 입력 | [0/Backspace] 쉼표 | [Space] 재생</div>
+  </div>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // G minor 스케일 주파수 매핑
+    const freqMap = {
+      1: 392.00, // G4
+      2: 440.00, // A4
+      3: 466.16, // Bb4
+      4: 523.25, // C5
+      5: 587.33, // D5
+      6: 622.25, // Eb5
+      7: 739.99  // F#5
+    };
+
+    const totalSteps = 16;
+    let sequence = new Array(totalSteps).fill(null);
+    let currentStep = 0;
+
+    const timelineEl = document.getElementById('timeline');
+
+    function renderTimeline() {
+      timelineEl.innerHTML = '';
+      for (let i = 0; i < totalSteps; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'grid-cell';
+        if (sequence[i]) {
+          cell.classList.add(`sd-${sequence[i]}`);
+          cell.innerText = sequence[i];
+        }
+        cell.onclick = () => { currentStep = i; highlightStep(); };
+        timelineEl.appendChild(cell);
+      }
+      highlightStep();
+    }
+
+    function highlightStep() {
+      const cells = timelineEl.children;
+      for (let i = 0; i < cells.length; i++) {
+        cells[i].style.outline = (i === currentStep) ? '3px solid #ffffff' : 'none';
+      }
+    }
+
+    function addNote(sd) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      sequence[currentStep] = sd;
+      playTone(freqMap[sd], 0.2);
+      currentStep = (currentStep + 1) % totalSteps;
+      renderTimeline();
+    }
+
+    function addRest() {
+      sequence[currentStep] = null;
+      currentStep = (currentStep + 1) % totalSteps;
+      renderTimeline();
+    }
+
+    function playTone(freq, duration) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle'; // 가볍고 부드러운 사운드
+      osc.frequency.value = freq;
+      
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function playMelody() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      
+      sequence.forEach((sd, index) => {
+        if (sd) {
+          setTimeout(() => {
+            playTone(freqMap[sd], 0.25);
+          }, index * 250); // 120 BPM 16분음표 간격
+        }
+      });
+    }
+
+    function clearMelody() {
+      sequence = new Array(totalSteps).fill(null);
+      currentStep = 0;
+      renderTimeline();
+    }
+
+    // 노트북용 키보드 단축키 지원
+    window.addEventListener('keydown', (e) => {
+      const key = parseInt(e.key);
+      if (key >= 1 && key <= 7) {
+        addNote(key);
+      } else if (e.key === '0' || e.key === 'Backspace') {
+        addRest();
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        playMelody();
+      }
+    });
+
+    renderTimeline();
+  </script>
+</body>
+</html>
